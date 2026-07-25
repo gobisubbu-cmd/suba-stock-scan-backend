@@ -8,6 +8,9 @@ app.use(express.json({ limit: '20mb' }));
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
 
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const ALERT_FROM_EMAIL = process.env.ALERT_FROM_EMAIL || 'SUBA Stock Alerts <onboarding@resend.dev>';
+
 const EXTRACTION_PROMPT = `You are looking at a photo or PDF of a stock/inventory document. This could be a
 handwritten stock register page, a printed stock ledger, a supplier invoice, a delivery
 challan, or a spare-parts price list.
@@ -40,7 +43,44 @@ function stripCodeFences(text) {
 }
 
 app.get('/health', (req, res) => {
-  res.json({ ok: true, hasKey: Boolean(ANTHROPIC_API_KEY) });
+  res.json({ ok: true, hasKey: Boolean(ANTHROPIC_API_KEY), hasEmailKey: Boolean(RESEND_API_KEY) });
+});
+
+app.post('/api/send-email', async (req, res) => {
+  try {
+    if (!RESEND_API_KEY) {
+      return res.status(500).json({ error: 'Server is missing RESEND_API_KEY. Set it in Render environment variables.' });
+    }
+    const { to, subject, text, html } = req.body || {};
+    if (!to || !subject || (!text && !html)) {
+      return res.status(400).json({ error: 'to, subject, and text or html are required.' });
+    }
+
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${RESEND_API_KEY}`,
+      },
+      body: JSON.stringify({
+        from: ALERT_FROM_EMAIL,
+        to: Array.isArray(to) ? to : [to],
+        subject,
+        text: text || undefined,
+        html: html || undefined,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      const message = data?.message || 'Email send failed.';
+      return res.status(response.status).json({ error: message });
+    }
+
+    return res.json({ ok: true, id: data.id });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Unexpected server error.' });
+  }
 });
 
 app.post('/api/extract', async (req, res) => {
