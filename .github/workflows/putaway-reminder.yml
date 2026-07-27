@@ -1,0 +1,23 @@
+name: Warehouse Put-away Daily Reminder
+
+on:
+  schedule:
+    # 09:00 AM IST = 03:30 UTC
+    - cron: '30 3 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  send-reminder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger backend reminder endpoint
+        run: |
+          status=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST "${{ secrets.PUTAWAY_BACKEND_URL }}/api/putaway-reminder" \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}")
+          echo "HTTP status: $status"
+          cat /tmp/response.json
+          if [ "$status" -ge 300 ]; then
+            echo "Reminder call failed."
+            exit 1
+          fi

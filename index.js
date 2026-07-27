@@ -10,6 +10,9 @@ const MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const ALERT_FROM_EMAIL = process.env.ALERT_FROM_EMAIL || 'SUBA Stock Alerts <onboarding@resend.dev>';
+const CRON_SECRET = process.env.CRON_SECRET;
+
+const { runPutawayReminder } = require('./putaway-reminder');
 
 const EXTRACTION_PROMPT = `You are looking at a photo or PDF of a stock/inventory document. This could be a
 handwritten stock register page, a printed stock ledger, a supplier invoice, a delivery
@@ -146,6 +149,21 @@ app.post('/api/extract', async (req, res) => {
     }
 
     return res.json({ items });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Unexpected server error.' });
+  }
+});
+
+app.post('/api/putaway-reminder', async (req, res) => {
+  try {
+    if (!CRON_SECRET) {
+      return res.status(500).json({ error: 'Server is missing CRON_SECRET. Set it in Render environment variables.' });
+    }
+    if (req.get('x-cron-secret') !== CRON_SECRET) {
+      return res.status(401).json({ error: 'Unauthorized.' });
+    }
+    const result = await runPutawayReminder({ RESEND_API_KEY, ALERT_FROM_EMAIL });
+    return res.json(result);
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Unexpected server error.' });
   }
