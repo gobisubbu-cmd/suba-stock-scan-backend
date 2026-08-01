@@ -15,26 +15,38 @@ const CRON_SECRET = process.env.CRON_SECRET;
 const { runPutawayReminder } = require('./putaway-reminder');
 
 const EXTRACTION_PROMPT = `You are looking at a photo or PDF of a stock/inventory document. This could be a
-handwritten stock register page, a printed stock ledger, a supplier invoice, a delivery
-challan, or a spare-parts price list.
+handwritten stock register page or chit, a printed stock ledger, a supplier purchase invoice,
+a delivery challan, a sales/tax invoice, a credit note / return, or a spare-parts price list.
 
-Extract every distinct stock item/line you can find and return ONLY a JSON array (no markdown
-fences, no commentary, no explanation) where each element has this exact shape:
+Return ONLY a single JSON object (no markdown fences, no commentary, no explanation) with this
+exact shape:
 
 {
-  "particulars": string,       // item name / description, required
-  "unit": string | null,       // e.g. "Nos", "Kg", "Mtr" - null if not shown
-  "quantity": number | null,   // stock / opening quantity if shown, else null
-  "rackNo": string | null,     // rack / bin / location code if shown
-  "hsnCode": string | null,    // HSN/SAC code if shown
-  "avgCost": number | null,    // unit cost / rate if shown
-  "reorderLevel": number | null // reorder / minimum level if shown
+  "document": {
+    "documentType": "purchase_invoice" | "delivery_challan" | "sales_invoice" | "credit_note" | "stock_register" | "price_list" | "other",
+    "documentNumber": string | null,   // invoice/DC/order number if shown
+    "documentDate": string | null,     // date as written on the document
+    "partyName": string | null         // the OTHER party's name: supplier name on a purchase invoice, customer name on a delivery challan or sales invoice
+  },
+  "items": [
+    {
+      "particulars": string,       // item name / description, required
+      "unit": string | null,       // e.g. "Nos", "Kg", "Mtr" - null if not shown
+      "quantity": number | null,   // quantity / stock shown for this line, else null
+      "rackNo": string | null,     // rack / bin / location code if shown
+      "hsnCode": string | null,    // HSN/SAC code if shown
+      "avgCost": number | null,    // unit cost / rate if shown
+      "reorderLevel": number | null // reorder / minimum level if shown
+    }
+  ]
 }
 
 Rules:
 - If a field is not present in the document, use null - do not guess or invent values.
-- Only include rows that clearly represent a stock item; skip headers, totals, and signatures.
-- Numbers must be plain numbers (no currency symbols, no commas).
+- Only include item rows that clearly represent a stock item; skip headers, totals, and signatures.
+- Numbers must be plain numbers (no currency symbols, no commas, no unit words like "Nos").
+- Handwriting is often messy — do your best reading; if a value is genuinely illegible, use null rather than guessing.
+- documentType: use "purchase_invoice" only if this document is a bill FROM a supplier TO this business; use "delivery_challan" for a DC/delivery note; use "sales_invoice" for a tax/sale invoice this business issued to a customer; use "stock_register" or "price_list" if there's no single named counterparty (e.g. an internal stock list); use "other" if unsure.
 - Return valid JSON only. The entire response must be parseable with JSON.parse.`;
 
 function stripCodeFences(text) {
@@ -137,18 +149,26 @@ app.post('/api/extract', async (req, res) => {
       return res.status(502).json({ error: 'No text returned from AI model.' });
     }
 
-    let items;
+    let parsed;
     try {
-      items = JSON.parse(stripCodeFences(textBlock.text));
+      parsed = JSON.parse(stripCodeFences(textBlock.text));
     } catch (e) {
       return res.status(502).json({ error: 'Could not parse AI response as JSON.', raw: textBlock.text });
     }
 
-    if (!Array.isArray(items)) {
-      return res.status(502).json({ error: 'AI response was not a JSON array.', raw: textBlock.text });
+    let items;
+    let document = null;
+    if (Array.isArray(parsed)) {
+      // Backward-compatible: older prompt shape, a bare array of items.
+      items = parsed;
+    } else if (parsed && Array.isArray(parsed.items)) {
+      items = parsed.items;
+      document = parsed.document || null;
+    } else {
+      return res.status(502).json({ error: 'AI response was not in the expected shape.', raw: textBlock.text });
     }
 
-    return res.json({ items });
+    return res.json({ items, document });
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Unexpected server error.' });
   }
