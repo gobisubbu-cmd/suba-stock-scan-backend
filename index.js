@@ -6,7 +6,7 @@ app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
+const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const ALERT_FROM_EMAIL = process.env.ALERT_FROM_EMAIL || 'SUBA Stock Alerts <onboarding@resend.dev>';
