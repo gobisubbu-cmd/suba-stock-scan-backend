@@ -31,6 +31,7 @@ exact shape:
   "items": [
     {
       "particulars": string,       // item name / description, required
+      "partCode": string | null,   // part number / item code / SKU / catalogue code for this line, if shown ANYWHERE on the row (a dedicated "Part No." / "Code" / "Item Code" column, or a code printed alongside/before the item name) - see rule below, this is important
       "unit": string | null,       // e.g. "Nos", "Kg", "Mtr" - null if not shown
       "quantity": number | null,   // quantity / stock shown for this line, else null
       "rackNo": string | null,     // rack / bin / location code if shown
@@ -46,6 +47,7 @@ Rules:
 - Only include item rows that clearly represent a stock item; skip headers, totals, and signatures.
 - Numbers must be plain numbers (no currency symbols, no commas, no unit words like "Nos").
 - Handwriting is often messy — do your best reading; if a value is genuinely illegible, use null rather than guessing.
+- partCode is critical: this document will be matched against a master catalogue of thousands of parts by their code, so read every row carefully for a part/item code, even if it's just a short alphanumeric string near the item name rather than in a clearly labelled column (e.g. "40.05.919P", "42.00.413"). If genuinely no code appears anywhere on a line, use null.
 - documentType: use "purchase_invoice" only if this document is a bill FROM a supplier TO this business; use "delivery_challan" for a DC/delivery note; use "sales_invoice" for a tax/sale invoice this business issued to a customer; use "stock_register" or "price_list" if there's no single named counterparty (e.g. an internal stock list); use "other" if unsure.
 - Return valid JSON only. The entire response must be parseable with JSON.parse.`;
 
