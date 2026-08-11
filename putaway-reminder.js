@@ -7,10 +7,13 @@
 // - If there are none, sends nothing.
 // - Otherwise builds Pending_Location_Report.xlsx (Invoice Number, Invoice Date, Supplier,
 //   Item Code, Description, Received Qty, Located Qty, Pending Qty, Days Pending, Status)
-//   and emails it via Resend to the Administrator, CC'ing Stores Manager / General Manager /
-//   Managing Director once any line's days-pending crosses 3 / 7 / 15 days respectively.
+//   and emails it via Gmail (using a Gmail account + App Password, since there's no verified
+//   custom domain to send through Resend) to the Administrator, CC'ing Stores Manager /
+//   General Manager / Managing Director once any line's days-pending crosses 3 / 7 / 15 days
+//   respectively.
 
 const XLSX = require('xlsx');
+const nodemailer = require('nodemailer');
 
 let admin;
 function getAdmin() {
@@ -81,7 +84,7 @@ function buildEmailBody({ pendingInvoices, pendingItems, pendingQty, oldestDays 
   ].join('\n');
 }
 
-async function runPutawayReminder({ RESEND_API_KEY, ALERT_FROM_EMAIL }) {
+async function runPutawayReminder({ GMAIL_USER, GMAIL_APP_PASSWORD }) {
   const fb = getAdmin();
   const db = fb.firestore();
 
@@ -129,18 +132,19 @@ async function runPutawayReminder({ RESEND_API_KEY, ALERT_FROM_EMAIL }) {
     oldestDays,
   });
 
-  if (!RESEND_API_KEY) {
-    throw new Error('Server is missing RESEND_API_KEY. Set it in Render environment variables.');
+  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
+    throw new Error('Server is missing GMAIL_USER or GMAIL_APP_PASSWORD. Set them in Render environment variables.');
   }
 
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${RESEND_API_KEY}`,
-    },
-    body: JSON.stringify({
-      from: ALERT_FROM_EMAIL,
+  const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
+  });
+
+  let info;
+  try {
+    info = await transporter.sendMail({
+      from: `SUBA Stock Alerts <${GMAIL_USER}>`,
       to: [adminEmail],
       cc: ccUnique.length ? ccUnique : undefined,
       subject,
@@ -148,20 +152,17 @@ async function runPutawayReminder({ RESEND_API_KEY, ALERT_FROM_EMAIL }) {
       attachments: [
         {
           filename: 'Pending_Location_Report.xlsx',
-          content: buf.toString('base64'),
+          content: buf,
         },
       ],
-    }),
-  });
-
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data?.message || 'Email send failed.');
+    });
+  } catch (err) {
+    throw new Error(err?.message || 'Email send failed.');
   }
 
   return {
     sent: true,
-    id: data.id,
+    id: info.messageId,
     to: adminEmail,
     cc: ccUnique,
     pendingInvoices: invoiceSet.size,
