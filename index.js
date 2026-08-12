@@ -11,8 +11,6 @@ const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const ALERT_FROM_EMAIL = process.env.ALERT_FROM_EMAIL || 'SUBA Stock Alerts <onboarding@resend.dev>';
 const CRON_SECRET = process.env.CRON_SECRET;
-const GMAIL_USER = process.env.GMAIL_USER;
-const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 
 const { runPutawayReminder } = require('./putaway-reminder');
 
@@ -186,7 +184,7 @@ app.post('/api/putaway-reminder', async (req, res) => {
     if (req.get('x-cron-secret') !== CRON_SECRET) {
       return res.status(401).json({ error: 'Unauthorized.' });
     }
-    const result = await runPutawayReminder({ GMAIL_USER, GMAIL_APP_PASSWORD });
+    const result = await runPutawayReminder({ RESEND_API_KEY, ALERT_FROM_EMAIL });
     return res.json(result);
   } catch (err) {
     return res.status(500).json({ error: err.message || 'Unexpected server error.' });

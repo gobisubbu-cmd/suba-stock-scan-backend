@@ -7,13 +7,17 @@
 // - If there are none, sends nothing.
 // - Otherwise builds Pending_Location_Report.xlsx (Invoice Number, Invoice Date, Supplier,
 //   Item Code, Description, Received Qty, Located Qty, Pending Qty, Days Pending, Status)
-//   and emails it via Gmail (using a Gmail account + App Password, since there's no verified
-//   custom domain to send through Resend) to the Administrator, CC'ing Stores Manager /
-//   General Manager / Managing Director once any line's days-pending crosses 3 / 7 / 15 days
-//   respectively.
+//   and emails it via Resend to the Administrator, CC'ing Stores Manager / General Manager /
+//   Managing Director once any line's days-pending crosses 3 / 7 / 15 days respectively.
+//
+//   NOTE: Render's free hosting blocks outbound SMTP connections (Gmail direct-send was tried
+//   and reliably timed out on both port 465 and 587), so this must go through Resend's HTTPS
+//   API rather than nodemailer/SMTP. Resend's sandbox (no verified domain) can only deliver to
+//   the Resend account's own signup address, so the Administrator alert email in Settings must
+//   be that same address; forward it on from there (e.g. a Gmail forwarding filter) if the
+//   report needs to reach a different inbox.
 
 const XLSX = require('xlsx');
-const nodemailer = require('nodemailer');
 
 let admin;
 function getAdmin() {
@@ -84,7 +88,7 @@ function buildEmailBody({ pendingInvoices, pendingItems, pendingQty, oldestDays 
   ].join('\n');
 }
 
-async function runPutawayReminder({ GMAIL_USER, GMAIL_APP_PASSWORD }) {
+async function runPutawayReminder({ RESEND_API_KEY, ALERT_FROM_EMAIL }) {
   const fb = getAdmin();
   const db = fb.firestore();
 
@@ -132,25 +136,18 @@ async function runPutawayReminder({ GMAIL_USER, GMAIL_APP_PASSWORD }) {
     oldestDays,
   });
 
-  if (!GMAIL_USER || !GMAIL_APP_PASSWORD) {
-    throw new Error('Server is missing GMAIL_USER or GMAIL_APP_PASSWORD. Set them in Render environment variables.');
+  if (!RESEND_API_KEY) {
+    throw new Error('Server is missing RESEND_API_KEY. Set it in Render environment variables.');
   }
 
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    requireTLS: true,
-    auth: { user: GMAIL_USER, pass: GMAIL_APP_PASSWORD },
-    connectionTimeout: 15000,
-    greetingTimeout: 15000,
-    socketTimeout: 15000,
-  });
-
-  let info;
-  try {
-    info = await transporter.sendMail({
-      from: `SUBA Stock Alerts <${GMAIL_USER}>`,
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: `Bearer ${RESEND_API_KEY}`,
+    },
+    body: JSON.stringify({
+      from: ALERT_FROM_EMAIL,
       to: [adminEmail],
       cc: ccUnique.length ? ccUnique : undefined,
       subject,
@@ -158,17 +155,20 @@ async function runPutawayReminder({ GMAIL_USER, GMAIL_APP_PASSWORD }) {
       attachments: [
         {
           filename: 'Pending_Location_Report.xlsx',
-          content: buf,
+          content: buf.toString('base64'),
         },
       ],
-    });
-  } catch (err) {
-    throw new Error(err?.message || 'Email send failed.');
+    }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data?.message || 'Email send failed.');
   }
 
   return {
     sent: true,
-    id: info.messageId,
+    id: data.id,
     to: adminEmail,
     cc: ccUnique,
     pendingInvoices: invoiceSet.size,
